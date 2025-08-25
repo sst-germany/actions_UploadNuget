@@ -1,0 +1,46 @@
+name: "NuGet Upload"
+description: "Pushes NuGet packages to GitHub Packages"
+
+inputs:
+  nuget-dir:
+    description: "Directory containing the .nupkg files"
+    required: false
+    default: "./.nuget"
+    
+  github-token:
+    description: "GitHub token used to authenticate against the package registry"
+    required: true
+    
+runs:
+  using: 'composite'
+  steps:
+    - name: List NuGet packages
+      run: Get-ChildItem "${{ inputs.nuget-dir }}"
+      shell: pwsh
+
+    - name: NuGet-Source entfernen
+      shell: pwsh        
+      run: |
+        $sources = dotnet nuget list source | ForEach-Object {
+          if ($_ -match '^\s*\d+\.\s+([^\[]+)\s*\[') { 
+            $matches[1].Trim()
+          }
+        }                
+        foreach ($name in $sources) {
+          Write-Host "Removing NuGet source: $name"
+          dotnet nuget remove source $name
+        }
+
+    - name: Add GitHub NuGet source
+      shell: pwsh
+      run: dotnet nuget add source --username ${{ github.actor }} --password ${{ inputs.github-token }} --store-password-in-clear-text --name github-cicd "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+    - name: Push NuGet Packages
+      shell: pwsh        
+      run: |
+        $pakete = Get-ChildItem "${{ inputs.nuget-dir }}" -Filter *.nupkg
+        if ($pakete.Count -eq 0) { Write-Error "No NuGet-Packet found!"; exit 1 }
+        foreach ($pkg in $pakete) {
+          Write-Host "Pushing $($pkg.FullName)"
+          dotnet nuget push $pkg.FullName --source "github-cicd" --api-key ${{ inputs.github-token }}
+        }
