@@ -10,6 +10,11 @@ inputs:
   github-token:
     description: "GitHub token used to authenticate against the package registry"
     required: true
+
+  simulate:
+    description: "Simulates the actions. No files will be uploaded to the registry."
+    required: false
+    default: false
     
 runs:
   using: 'composite'
@@ -21,26 +26,48 @@ runs:
     - name: NuGet-Source entfernen
       shell: pwsh        
       run: |
-        $sources = dotnet nuget list source | ForEach-Object {
-          if ($_ -match '^\s*\d+\.\s+([^\[]+)\s*\[') { 
-            $matches[1].Trim()
-          }
-        }                
-        foreach ($name in $sources) {
-          Write-Host "Removing NuGet source: $name"
-          dotnet nuget remove source $name
+        if (-not ("${{ inputs.simulate }}" -ieq "true"))
+        {
+            $sources = dotnet nuget list source | ForEach-Object {
+              if ($_ -match '^\s*\d+\.\s+([^\[]+)\s*\[') { 
+                $matches[1].Trim()
+              }
+            }                
+            foreach ($name in $sources) {
+              Write-Host "Removing NuGet source: $name"
+              dotnet nuget remove source $name
+            }
         }
 
     - name: Add GitHub NuGet source
       shell: pwsh
-      run: dotnet nuget add source --username ${{ github.actor }} --password ${{ inputs.github-token }} --store-password-in-clear-text --name github-cicd "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+      run: |
+        if ("${{ inputs.simulate }}" -ieq "true")
+        {
+            Write-Host "dotnet nuget add source --username ${{ github.actor }} --password ***** --store-password-in-clear-text --name github-cicd \"https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json\""
+        }
+        else
+        {
+            dotnet nuget add source --username ${{ github.actor }} --password ${{ inputs.github-token }} --store-password-in-clear-text --name github-cicd "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+        }
 
     - name: Push NuGet Packages
       shell: pwsh        
       run: |
         $pakete = Get-ChildItem "${{ inputs.nuget-dir }}" -Filter *.nupkg
-        if ($pakete.Count -eq 0) { Write-Error "No NuGet-Packet found!"; exit 1 }
-        foreach ($pkg in $pakete) {
-          Write-Host "Pushing $($pkg.FullName)"
-          dotnet nuget push $pkg.FullName --source "github-cicd" --api-key ${{ inputs.github-token }}
+        if ($pakete.Count -eq 0) 
+        { 
+            throw "No NuGet-Packet found!"
         }
+        foreach ($pkg in $pakete) 
+        {
+            Write-Host "Pushing $($pkg.FullName)"
+            if ("${{ inputs.simulate }}" -ieq "true")
+            {
+              Write-Host "dotnet nuget push $pkg.FullName --source \"github-cicd\" --api-key *****"
+            }
+            else
+            {
+              dotnet nuget push $pkg.FullName --source "github-cicd" --api-key ${{ inputs.github-token }}
+            }
+        }        
